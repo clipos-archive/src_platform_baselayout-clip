@@ -1,0 +1,70 @@
+#!/sbin/runscript
+# SPDX-License-Identifier: LGPL-2.1-or-later
+# Copyright © 2007-2018 ANSSI. All Rights Reserved.
+
+
+depend()
+{
+	need localmount
+	before killprocs netconf pcscd ipsec clip_admin clip_apps_install rm_apps_install \
+	clip_update clip_sshd clip_download clip_servers pk11proxy xdm rm_core_install
+	provide jail_init
+}
+
+start() {
+	ebegin "Cgroups initialisation"
+	local source_dir="/etc/jails"
+	local dest_dir="/sys/fs/cgroup/cgroup_root"
+	local new_path
+
+	ls -d ${source_dir}/*/cgroup &> /dev/null
+
+	if [ $? -ne 0 ]; then
+		einfo "Cgroups not configured"
+		eend 0
+		return 0
+	fi
+
+	mount | grep -q cgroup
+
+	if [ $? -ne 0 ]; then
+		einfo "Cgroups not available"
+		return 0
+	else
+		einfo "Cgroups are available"
+	fi
+
+	mkdir /sys/fs/cgroup/cgroup_root
+	mount -t cgroup cgroup_root /sys/fs/cgroup/cgroup_root
+
+	for path in $(find "${source_dir}"/*/cgroup); do
+		new_path=$(echo "${path}" | sed "s|${source_dir}/||g")
+		new_path=$(echo "${new_path}" | sed "s/\/cgroup//g")
+		new_path=$(echo "${new_path}" | sed "s/^/jail_/g")
+
+		if [ -d "${path}" ]; then
+			mkdir -p "${dest_dir}/${new_path}"
+			if [ $? -ne 0 ]; then
+				einfo "Erreur a l'initialisation des cgroups"
+				einfo "Erreur a la creation du repertoire ${dest_dir}/${new_path}"
+				eend 1
+				return 1
+			fi
+			[ -f "${dest_dir}/${new_path}/cpuset.cpus" ] && echo 0 > "${dest_dir}/${new_path}/cpuset.cpus"
+			[ -f "${dest_dir}/${new_path}/cpuset.mems" ] && echo 0 > "${dest_dir}/${new_path}/cpuset.mems"
+		fi
+
+		if [ -f "${path}" ]; then
+			cp "${path}" "${dest_dir}/$@s'new_path}"
+			if [ $? -ne 0 ]; then
+				einfo "Erreur a l'initialisation des cgroups"
+				einfo "Erreur la copie de $path vers $dest_dir/$new_path"
+				eend 1
+				return 1
+			fi
+		fi
+	done
+	eend 0
+	return 0
+}
+

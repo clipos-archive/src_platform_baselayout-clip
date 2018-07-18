@@ -1,0 +1,93 @@
+#!/sbin/runscript
+# Copyright (c) 2007-2009 Roy Marples <roy@marples.name>
+# Copyright © 2007-2018 ANSSI. All Rights Reserved.
+# Released under the 2-clause BSD license.
+# Adapted for CLIP - Vincent Strubel <clipos@ssi.gouv.fr>
+
+description="Re-mount filesytems read-only for a clean reboot."
+
+depend()
+{
+	need killprocs savecache
+	keyword -openvz -prefix -vserver -lxc
+}
+
+unset_loops() {
+	# If jails are properly dead, the only mount of a loop-backed
+	# crypt mapping possibly remaining by now should be /home/user
+	umount -n "/home/user" 2>/dev/null
+
+	for f in /dev/mapper/*; do
+		local dev="$(cryptsetup status "${f}" | awk '$1 == "device:" {print $2}')"
+		if [[ -n "${dev}" && "${dev#/dev/loop}" != "${dev}" ]]; then
+			cryptsetup remove "${f}" 2>/dev/null \
+				|| ewarn "Encrypted mapping ${f} (loop-backed) is still active"
+		fi
+	done
+
+	for d in /dev/loop/*; do
+		[[ -b "${d}" ]] && losetup -d "${d}" 2>/dev/null
+	done
+}
+
+unset_crypt_mappings() {
+	local ret=0
+	for f in /dev/mapper/*; do
+		bn="$(basename "${f}")"
+
+		# N.B. : no point removing swap mappings
+		if [[ "${bn}" != "control" && "${bn#swap}" == "${bn}" ]]; then
+			if ! cryptsetup remove "${bn}" 2>/dev/null; then
+				ewarn "Encrypted mapping ${f} is still active"
+				ret=1
+			fi
+		fi
+	done
+	return $ret
+}
+
+start()
+{
+	local ret=0
+
+	# Flush all pending disk writes now
+	sync; sync
+
+	unset_loops
+
+	ebegin "Remounting remaining filesystems read-only"
+	# We need the do_unmount function
+	. "$RC_LIBEXECDIR"/sh/rc-mount.sh
+	eindent
+
+	# Bug 381783
+	local rc_svcdir=$(echo $RC_SVCDIR | sed 's:/lib\(32\|64\)\?/:/lib(32|64)?/:g')
+
+	local m="/dev|/dev/.*|/proc|/proc.*|/sys|/sys/.*|/run|${rc_svcdir}" x= fs=
+	m="$m|/bin|/sbin|/lib(32|64)?|/libexec"
+	# RC_NO_UMOUNTS is an env var that can be set by plugins
+	local IFS="$IFS:"
+	for x in $no_umounts $RC_NO_UMOUNTS; do
+		m="$m|$x"
+	done
+	m="^($m)$"
+	fs=
+	for x in $net_fs_list $extra_net_fs_list; do
+		fs="$fs${fs:+|}$x"
+	done
+	[ -n "$fs" ] && fs="^($fs)$"
+	do_unmount "umount -rn" \
+		--skip-point-regex "$m" \
+		"${fs:+--skip-fstype-regex}" $fs --nonetdev
+	ret=$?
+
+	eoutdent
+
+	unset_crypt_mappings
+
+	if [[ -e "/dev/leds/start" ]]; then
+		echo -n '0' > "/dev/leds/start"
+	fi
+
+	eend $ret
+}

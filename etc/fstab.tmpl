@@ -1,0 +1,26 @@
+proc				/proc		proc		nosuid,nodev,noexec,noauto				0 0
+sys				/sys		sysfs 		nosuid,nodev,noexec,noauto				0 0
+
+/dev/ROOT_DEV			/		ext3,ext4		ro,noatime,barrier=1,errors=panic			0 1
+/dev/HOME_DEV			/home		ext3,ext4		nosuid,nodev,noexec,noatime,barrier=1,errors=panic	0 2
+/dev/MOUNTS_DEV			/mounts		ext3,ext4		defaults,noatime,barrier=1,errors=panic			0 2
+/dev/SWAP_DEV			none		swap		defaults,noauto						0 0
+/home/etc.users/tcb		/etc/tcb	none		bind,noexec,nosuid,noexec,noatime			0 0
+/home/etc.users/core		/etc/core	none		bind,noexec,nosuid,noexec,noatime			0 0
+
+/dev/RMH_DEV            	/vservers/rm_h          ext3,ext4            defaults,nodev,barrier=1,errors=panic         0 2
+/dev/RMB_DEV            	/vservers/rm_b          ext3,ext4            defaults,nodev,barrier=1,errors=panic         0 2
+
+/mounts/usr			/usr/local	none		bind,rw,nodev,noatime					0 0
+/mounts/var			/var		none		bind,nosuid,nodev,noatime				0 0
+/mounts/admin_priv/etc.admin	/etc/admin	none		bind,noexec,nosuid,nodev,noatime			0 0
+/mounts/admin_priv/etc.ike2	/etc/admin/ike2	none		bind,noexec,nosuid,nodev,noatime			0 0
+/mounts/audit_priv/etc.audit	/etc/audit	none		bind,noexec,nosuid,nodev,noatime			0 0
+
+tmp				/tmp		tmpfs		noexec,nosuid,nodev,noatime,mode=1777			0 0
+pts				/dev/pts	devpts		newinstance,ptmxmode=0620,gid=5,mode=620,noexec,nosuid	0 0
+shm				/dev/shm	tmpfs		nodev,nosuid,noexec,noatime				0 0
+
+/dev/LOG_DEV			/var/log	ext3,ext4		nosuid,noexec,nodev,noatime,barrier=1,errors=panic	0 2
+cgroup 				/sys/fs/cgroup	tmpfs	        defaults					        0 0
+

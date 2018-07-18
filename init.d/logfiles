@@ -1,0 +1,209 @@
+#!/sbin/runscript
+# SPDX-License-Identifier: LGPL-2.1-or-later
+# Copyright © 2007-2018 ANSSI. All Rights Reserved.
+# Copyright (C) 2007 SGDN/DCSSI
+# Author: Vincent Strubel <clipos@ssi.gouv.fr>
+# All rights reserved.
+
+description="Create log files for CLIP"
+
+depend() {
+	need localmount
+	before sysctl
+	keyword -timeout
+}
+
+# Add generic log files for a jail that requires logging
+add_jail_files() {
+	local jail="${1}"
+
+	SYSLOG_FILES+=( 
+		"${jail}_auth.log" "${jail}_daemon.log" "${jail}_cron.log"
+		"${jail}_messages.log" "${jail}_ssp.log" "${jail}_update.log"
+	)
+}
+
+# Add extra log files listed in a configuration file (separated by whitespace or
+# new lines)
+add_extra_files() {
+	SYSLOG_FILES+=( $(<"${1}") )
+}
+
+get_log_files() {
+	SYSLOG_FILES=( 
+		# Kernel
+		"audit.log" "clsm.log" "fstrace.log" "grsec.log" "grsec_mount.log"
+		"kern.log" "pax.log" "veriexec.log" "vserver.log"
+		# Generic userlang
+		"auth.log" "daemon.log" "debug" "messages" "ssp.log" "user.log"
+		# Updates
+		"apt_dpkg.log" "download.log" "history.log" "update.log"
+		# Network
+		"fw.log" "ike.log" "nosp.log"
+		# Specific services
+		"cron.log" "cryptd.log" "mail.log" "syslog" "rc.log"
+	)
+
+	source /etc/conf.d/clip
+	# Add RM jails (for each RM jail actually used by the system)
+	for jail in ${CLIP_JAILS}; do
+		add_jail_files "${jail}"
+	done
+
+	# Add other jails that require logging
+	for jailpath in "/etc/jails"/*; do
+		# Create generic files if syslog.socket is defined
+		[[ -e "${jailpath}/syslog.socket" ]] && add_jail_files "$(basename "${jailpath}")"
+	done
+
+	# Create extra files as defined in /etc/syslog.d/*.logfiles
+	for f in "/etc/syslog.d"/*.logfiles; do
+		[[ -f "${f}" ]] && add_extra_files "${f}"
+	done
+
+	return 0
+}
+
+get_conf() {
+	local -i min_keepfiles=5
+	local -i min_keepdays=365
+	local -i min_keepsize=20
+
+	KEEPSIZE=${min_keepsize}
+	LOGDIR="/var/log"
+	KEEPDIR="${LOGDIR}/keep"
+	LOGROTATE_CONF="/var/run/logrotate.conf"
+
+	local conffile="/etc/audit/logfiles"
+
+	KEEPFILES_FILTER="[0-9]{1,2}"
+	KEEPSIZE_FILTER="[1-9][0-9]{1,5}"
+	KEEPDAYS_FILTER="[0-9]{1,3}"
+
+	source /lib/clip/import.sub
+
+	if [[ ! -e "${conffile}" ]]; then
+		ewarn "${conffile} not found, using default logfiles parameters"
+		return 1
+	fi
+
+	if ! import_conf_noerr "${conffile}" "${KEEPSIZE_FILTER}" "KEEP_SIZE" 2>/dev/null; then
+		ewarn "Failed to import KEEP_SIZE, using default logfiles parameters"
+	fi
+	import_conf_noerr "${conffile}" "${KEEPDAYS_FILTER}" "KEEP_DAYS" 2>/dev/null
+	if [[ -n "${KEEP_DAYS}" ]] ; then
+		if [[ ${KEEP_DAYS} -gt ${min_keepdays} ]] ; then
+			KEEPDAYS="${KEEP_DAYS}"
+		else
+			ewarn "KEEP_DAYS too small, keeping the default (${min_keepdays})"
+			KEEPDAYS=${min_keepdays}
+		fi
+	elif ! import_conf_noerr "${conffile}" "${KEEPFILES_FILTER}" "KEEP_FILES_NUMBER" 2>/dev/null; then
+		ewarn "Failed to import KEEP_DAYS and KEEP_FILES_NUMBER, using default logfiles parameters"
+		KEEPDAYS=${min_keepdays}
+	fi
+
+	if [[ -n "${KEEP_FILES_NUMBER}" ]] ; then
+		if [[ ${KEEP_FILES_NUMBER} -gt ${KEEPFILES_MIN} ]] ; then
+			KEEPFILES=${KEEP_FILES_NUMBER}
+		else
+			ewarn "KEEP_FILES_NUMBER too small, keeping the default (${min_keepfiles})"
+			KEEPFILES=${min_keepfiles}
+		fi
+	fi
+
+	if [[ -n "${KEEP_SIZE}" && ${KEEP_SIZE} -gt ${KEEPSIZE} ]] ; then
+		KEEPSIZE=${KEEP_SIZE}
+	else
+		ewarn "KEEP_SIZE too small, keeping the default (${KEEPSIZE})"
+	fi
+
+	get_log_files
+}
+
+create_bootlog() {
+	local dmsg="${LOGDIR}/dmesg"
+	if [[ -f "${dmsg}" ]]; then
+		chattr -ia "${dmsg}"
+	else
+		: >"${dmsg}"
+	fi
+	chmod 0640 "${dmsg}" || return 1
+	chown root:syslog "${dmsg}" || return 1
+	dmesg > "${dmsg}" || return 1
+	chattr +i "${dmsg}" || return 1
+}
+
+create_config() {
+	export KEEPSIZE KEEPFILES KEEPDIR KEEPDAYS
+	if [[ -f "${LOGROTATE_CONF}" ]]; then
+		chattr -i "${LOGROTATE_CONF}"
+		rm -f "${LOGROTATE_CONF}"
+	fi
+	if [[ -e "${LOGROTATE_CONF}" ]]; then
+		ewarn "${LOGROTATE_CONF} exists and is not a regular file, bailing out"
+		return 1
+	fi
+	touch "${LOGROTATE_CONF}" || return 1
+	export OUTPUT="${LOGROTATE_CONF}"
+	source "/etc/logrotate.skel" || return 1
+	# Make the config file itself immutable
+	chattr +i "${LOGROTATE_CONF}" || return 1
+}
+
+create_files() {
+	local -i ret=0
+	for f in "${SYSLOG_FILES[@]}"; do
+		if [[ -e "${LOGDIR}/${f}" ]]; then
+			chattr -a "${LOGDIR}/${f}"
+		else
+			: >"${LOGDIR}/${f}"
+		fi
+		chmod 0640 "${LOGDIR}/${f}" || ret=1
+		chown syslog:syslog "${LOGDIR}/${f}" || ret=2
+		chattr +a "${LOGDIR}/${f}" || ret=3
+		[[ $ret -eq 0 ]] || ewarn "Could not create log file : ${LOGDIR}/${f} (ret=$ret)"
+	done
+	return $ret
+}
+
+rotate_files() {
+	create_config || return 1
+	if ! create_files ; then
+		# Most plausible explanation is that there is no more free space
+		# in /var/log - running logrotate might ease the pressure somewhat
+		ewarn "Failed to create some log files, will try a logrotate"
+		logrotate "${LOGROTATE_CONF}" # errors ignored
+		# Then give it another go
+		if create_files; then
+			einfo "Second time's a charm, we're good to go"
+		else
+			ewarn "Well, that didn't help, all log files could not be created, have a nice day"
+			return 1
+		fi
+	fi
+
+	logrotate "${LOGROTATE_CONF}" 
+	# ignore logrotate errors, they might just mean some files that
+	# could have been rotated were not rotated (e.g. in the case
+	# of multiple reboots in the same day
+	return 0
+}
+
+# Reserve 20% of block to root on the /var/log/partition
+# to help logrotate calls succeed
+setup_partition_flags() {
+	local part="$(awk '$2 == "/var/log" { print $1 }' /proc/mounts)"
+
+	[[ -n "${part}" ]] && tune2fs -m 20 "${part}" 1>/dev/null
+}
+
+start() {
+	local ret=0
+	ebegin "Rotating log files"
+	(setup_partition_flags) &
+	get_conf || ret=1
+	rotate_files || ret=1
+	create_bootlog || ret=1
+	eend $ret
+}

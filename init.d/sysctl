@@ -1,0 +1,18 @@
+#!/sbin/runscript
+# SPDX-License-Identifier: LGPL-2.1-or-later
+# Copyright © 2007-2018 ANSSI. All Rights Reserved.
+
+depend() {
+	need logfiles vprocunhide
+}
+
+start() {
+	local ret=0
+	vebegin "Configuring kernel parameters"
+	for conf in /etc/sysctl.conf /etc/sysctl.d/*.conf; do
+		if [[ -r "${conf}" ]]; then
+			sysctl -q -p "${conf}" || ret=1
+		fi
+	done
+	veend $ret
+}

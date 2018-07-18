@@ -1,0 +1,49 @@
+#!/sbin/runscript
+# Copyright (c) 2007-2008 Roy Marples <roy@marples.name>
+# Released under the 2-clause BSD license.
+
+description="Executes user programs in /etc/local.d"
+
+depend()
+{
+	after *
+	keyword -timeout
+}
+
+start()
+{
+	einfo "Starting local services..."
+	eindent
+
+	local file bn
+	for file in /etc/local.d/*.start ; do
+		[[ -x "${file}" ]] || continue
+		bn="$(basename ${file%.start})"
+		if "${file}"; then
+			einfo "${bn} started"
+		else
+			ewarn "${bn} failed to start"
+		fi
+	done
+
+	eoutdent
+}
+
+stop()
+{
+	einfo "Stopping local services..."
+	eindent
+
+	local file bn
+	for file in /etc/local.d/*.stop; do
+		[[ -x "${file}" ]] || continue
+		bn="$(basename ${file%.stop})"
+		if "${file}"; then
+			einfo "${bn} stopped"
+		else
+			ewarn "${bn} failed to stop"
+		fi
+	done
+
+	eoutdent
+}

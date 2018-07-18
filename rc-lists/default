@@ -1,0 +1,15 @@
+init_cgroups
+bootmisc
+checkfs
+consolefont
+dmesg
+hostname
+hwclock
+keymaps
+local
+localmount
+logfiles
+swapon
+sysctl
+termencoding
+urandom

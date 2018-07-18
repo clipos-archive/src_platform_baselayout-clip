@@ -1,0 +1,70 @@
+#!/sbin/runscript
+# Copyright (c) 2007-2008 Roy Marples <roy@marples.name>
+# Copyright © 2007-2018 ANSSI. All Rights Reserved.
+# Released under the 2-clause BSD license.
+# Adapted for CLIP - Vincent Strubel <clipos@ssi.gouv.fr>
+
+description="Sets the local clock to UTC or Local Time."
+: ${clock:=${CLOCK:-UTC}}
+: ${clock_args:=${CLOCK_OPTS}}
+
+
+if [ "$clock" = "UTC" ]; then
+	utc="UTC"
+	utc_cmd="--utc"
+else
+	utc="Local Time"
+	utc_cmd="--localtime"
+fi
+
+depend() {
+	need localmount
+}
+
+# hwclock doesn't always return non zero on error
+_hwclock()
+{
+	local err="$(hwclock "$@" 2>&1 >/dev/null)"
+
+	[ -z "$err" ] && return 0
+	echo "${err}" >&2
+	return 1
+}
+
+start() {
+	local retval=0 errstr=""
+
+	ebegin "Setting system clock using the hardware clock [$utc]"
+
+	# If setting UTC, don't bother to run hwclock when first booting
+	# as that's the default
+	if [ "$PREVLEVEL" != N -o \
+		"$utc_cmd" != --utc -o \
+		-n "$clock_args" ];
+	then
+		if yesno ${clock_hctosys:-YES}; then
+			_hwclock --hctosys $utc_cmd $clock_args
+		else
+			_hwclock --systz $utc_cmd $clock_args
+		fi
+		: $(( retval += $? ))
+	fi
+
+	eend $retval "Failed to set the system clock"
+}
+
+stop() {
+	yesno ${clock_systohc:-YES} || return 0
+
+	local retval=0 errstr=""
+
+	utc_cmd="$utc_cmd --noadjfile"
+
+	ebegin "Setting hardware clock using the system clock" "[$utc]"
+	_hwclock --systohc $utc_cmd $clock_args
+	retval=$?
+
+	eend $retval "Failed to sync clocks"
+}
+
+# vim:ts=4

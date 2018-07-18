@@ -1,0 +1,70 @@
+#!/sbin/runscript
+# SPDX-License-Identifier: LGPL-2.1-or-later
+# Copyright © 2007-2018 ANSSI. All Rights Reserved.
+
+description="Start the X server"
+
+depend() {
+	need localmount clip_user reducecap clip_x11 clip_audit mkdevices jail_init
+	after clip_apps_install
+	before local
+}
+
+EXE="/usr/local/bin/slim"
+SERVICE="slim"
+
+setup_geom() {
+	local fbpath="/sys/class/graphics/fb0"
+	local res="$(fbres)"
+	if [[ -z "${res}" ]]; then
+		res="$(sed -e 's/,/x/' "${fbpath}/virtual_size")"
+	fi
+	local depth="$(<"${fbpath}/bits_per_pixel")"
+	if [[ -z "${res}" || -z "${depth}" ]]; then 
+		ewarn "Could not detect screen geometry, defaulting to 1024x768:32"
+		geom="1024x768:32"
+	else
+		geom="${res}:${depth}"
+	fi
+
+	local umask="$(umask)"
+	umask 022
+	echo "${geom}" > "/etc/core/current.geom"
+	umask "${umask}"
+}
+
+update_conf() {
+	# adjust to the current value of /etc/shared/video
+	[ -f /usr/local/bin/xorg-server-conf-upgrade.sh ] && \
+	/usr/local/bin/xorg-server-conf-upgrade.sh
+}
+
+start() {
+	setup_geom
+   	ebegin "Setting up ${SERVICE}"
+	update_conf
+	start-stop-daemon --start \
+		-x "${EXE}" -b
+	eend $?
+
+}
+
+stop() {
+	local retval=0
+	
+	ebegin "Stopping ${SERVICE}"
+	
+	start-stop-daemon --stop -x "${EXE}"
+	
+	# kill X server, explicitily
+	ebegin "Killing xserver in context: $xserverctx"
+	vsctl x11 stop
+	retval=$?
+	eend $retval
+
+	splash "silent"
+	return $retval
+}
+
+
+# vim:ts=4

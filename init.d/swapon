@@ -1,0 +1,34 @@
+#!/sbin/runscript
+# SPDX-License-Identifier: LGPL-2.1-or-later
+# Copyright © 2007-2018 ANSSI. All Rights Reserved.
+# Swapon script for CLIP - Vincent Strubel <clipos@ssi.gouv.fr>
+
+description="Activate encrypted swap"
+
+depend() {
+	need urandom
+}
+
+start() {
+	local swap=`awk '$3 ~ /^swap$/ { print $1 }' /etc/fstab | head -n 1`
+	if [[ -n "${swap}" ]]; then
+		ebegin "Activating swap on ${swap}"
+		if ! cryptsetup -c aes-xts-plain -h sha512  -s 512 \
+							-d /dev/urandom create swap0 ${swap}; then
+			eend 1 "Failed to create cryptographic mapping"
+			return 1
+		fi
+		if ! mkswap -f /dev/mapper/swap0 1>/dev/null ; then
+			eend 1 "Failed to create swap partition"
+			return 1
+		fi
+		if ! swapon /dev/mapper/swap0; then
+			eend 1 "Failed to setup swap"
+			return 1
+		fi
+		eend 0
+	fi
+
+}
+
+# vim:ts=4

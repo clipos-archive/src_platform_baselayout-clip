@@ -1,0 +1,12 @@
+bootmisc
+dmesg
+logfiles
+termencoding
+consolefont
+keymaps
+urandom
+checkfs
+hwclock
+hostname
+localmount
+swapon

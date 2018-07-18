@@ -1,0 +1,92 @@
+#!/sbin/runscript
+# Copyright (c) 2007-2009 Roy Marples <roy@marples.name>
+# Copyright © 2007-2018 ANSSI. All Rights Reserved.
+# Released under the 2-clause BSD license.
+# Adapted for CLIP - Vincent Strubel <clipos@ssi.gouv.fr>
+
+
+description="Check and repair filesystems according to /etc/fstab"
+
+depend() {
+	keyword -timeout
+}
+
+
+_abort() {
+	rc-abort
+	return 1
+}
+
+# We should only reboot when first booting
+_reboot() {
+	if [ "$RC_RUNLEVEL" = "$RC_BOOTLEVEL" ]; then
+		reboot "$@"
+		_abort || return 1
+	fi
+}
+
+do_fsck() {
+	local from="${1}"
+	local ret
+	local devlist="$(awk '$3 ~ /^ext3(|,ext4)$/ { print $1 }' "${from}")"
+
+	local tocheck="$(test_fsck ${devlist})"
+	[[ -z "${tocheck}" ]] && return 0
+
+	chvt 8
+	clear
+	printf "${GOOD}    La vérification de certaines partitions est nécessaire.\n" >/dev/tty8
+	printf "${GOOD}    Veuillez patienter pendant la vérification.\n\n\n" >/dev/tty8
+	echo -n "${NORMAL}" >/dev/tty8
+
+	local args
+	if [[ "${from}" == "/etc/fstab" ]]; then
+			args="-A"
+	else
+			args="${devlist}" 
+	fi
+
+	ebegin "Vérification des systèmes de fichiers (${from})" >/dev/tty8
+	fsck -C0 -T -a ${args} >/dev/tty8 2>&1 
+	ret=$?
+	case $ret in
+			0)	
+				eend 0; 
+				splash 'silent'
+				return 0
+				;;
+			1)	
+				ewend 1 "Certaines erreurs ont été corrigées, le démarrage peut se poursuivre" >/dev/tty8
+				splash 'silent'
+				return 0
+				;;
+			2|3)
+				ewend 1 "Certaines erreurs ont été corrigées, un redémarrage est nécessaire" >/dev/tty8
+				splash 'silent'
+				_reboot -f
+				;;
+			*)
+				eend 2 "Toutes les erreurs n'ont pas pu être corrigées, le système va être redémarré" >/dev/tty8
+				fsck -C -T -y ${args}
+				splash 'silent'
+				_reboot -f
+		;;
+	esac
+}
+
+start() {
+	local ret=0 fstab
+
+	do_fsck "/etc/fstab" || ret=1
+
+	for fstab in /etc/fstab.d/*; do
+		if [[ -f "${fstab}" ]]; then
+			do_fsck "${fstab}" || ret=1
+		fi
+	done
+
+	return ${ret}
+}
+
+
+# vim:ts=4

@@ -1,0 +1,6 @@
+# /etc/env.d/00basic
+
+MANPATH="/usr/local/share/man:/usr/share/man"
+INFOPATH="/usr/local/share/info:/usr/share/info"
+PAGER="/usr/bin/less"
+LESSOPEN="|lesspipe.sh %s"

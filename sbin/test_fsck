@@ -1,0 +1,141 @@
+#!/usr/bin/perl
+# SPDX-License-Identifier: LGPL-2.1-or-later
+# Copyright © 2007-2018 ANSSI. All Rights Reserved.
+# Print a list of devices that will need to be fsck'ed 
+# Author: Vincent Strubel <clipos@ssi.gouv.fr>
+
+use strict;
+use warnings;
+use Time::Local;
+
+my $g_date_re = '\D{3}\s+(\D{3})\s+(\d{1,2})\s+(\d{2}):(\d{2}):(\d{2})\s+(\d{4})';
+
+my $g_months = {
+	Jan	=> 0,
+	Feb	=> 1,
+	Mar	=> 2,
+	Apr	=> 3,
+	May	=> 4,
+	Jun	=> 5,
+	Jul	=> 6,
+	Aug	=> 7,
+	Sep	=> 8,
+	Oct	=> 9,
+	Nov	=> 10,
+	Dec	=> 11,
+};
+
+sub _warn($) {
+	my $msg = shift;
+	print STDERR "$msg\n";
+}
+
+sub format_date($) {
+	my $date822 = shift;
+
+	my ($sec, $min, $hour, $mday, $mon, $year);
+
+	if ($date822 =~ /^$g_date_re$/) {
+		unless (defined ($g_months->{$1})) {
+			_warn "invalid month: $1";
+			return "";
+		}
+		$mon = $g_months->{$1};
+		$mday = $2;
+		$hour = $3;
+		$min = $4;
+		$sec = $5;
+		$year = $6;
+	} else {
+		_warn "invalid release date: $date822";
+		return "";
+	}
+
+	my $ptime = timegm($sec, $min, $hour, $mday, $mon, $year);
+
+	return $ptime;
+}
+
+sub write_max_count($$) {
+	my ($dev, $count) = @_;
+
+	unless (open PIPE, "/sbin/tune2fs -c $count $dev 2>/dev/null |") {
+		_warn "Failed to run tune2fs -c $count $dev";
+		return 0;
+	}
+	my @output = <PIPE>;
+	unless (close PIPE) {
+		_warn "tune2fs -c $count $dev returned an error";
+		foreach (@output) {
+			_warn "tune2fs output: $_";
+		}
+		return 0;
+	}
+	return 1;
+}
+
+sub get_fs_info($) {
+	my $dev = shift;
+	my %info = (
+		"name"		=>	$dev,
+		"clean" 	=>	0,
+		"count"		=>	0,
+		"max_count"	=>	0,
+		"max_date"	=>	"",
+	);
+
+	unless (open PIPE, "/sbin/dumpe2fs -h $dev 2>/dev/null |") {
+		_warn "Failed to run dumpe2fs -h $dev";
+		return undef;
+	}
+
+	foreach my $line (<PIPE>) {
+		if ($line =~ /^Filesystem state:\s+(\S+)/) {
+			$info{"clean"} = 1 if ($1 eq "clean");
+		} elsif ($line =~ /^Mount count:\s+(\d+)/) {
+			$info{"count"} = $1;
+		} elsif ($line =~ /^Maximum mount count:\s+(\d+)/) {
+			$info{"max_count"} = $1;
+		} elsif ($line =~ /^Next check after:\s+(.+)/) {
+			$info{"max_date"} = format_date($1);
+		}
+	}
+	close PIPE or return undef;
+
+	# If no max count is specified, generate one (somewhat) randomly
+	# between 20 and 40, and *write it* to the fs superblock (so it will
+	# be picked up by fsck)
+	if ($info{"max_count"} eq 0) {
+		my $count = 20 + int(rand(20));
+		write_max_count($dev, $count); # ignore errors for now
+		$info{"max_count"} = $count;
+	}
+
+	return \%info;
+}
+
+sub check_needed($$) {
+	my ($dev, $time) = @_;
+	my $infref;
+	return 0 unless (defined($infref = get_fs_info($dev)));
+	
+	return 1 unless ($infref->{"clean"});
+	return 1 if ($infref->{"count"} > $infref->{"max_count"});
+	if ($infref->{"max_date"}) {
+		return 1 if ($time >= $infref->{"max_date"});
+	}
+
+	return 0;
+}
+
+my @tocheck = ();
+
+# Let's take a small margin in time to account for execution time, etc
+# => we'll get false positives, rather than false negatives
+my $time = time() + 30;
+
+foreach my $dev (@ARGV) {
+	push @tocheck, $dev if (check_needed($dev, $time));
+}
+
+print join (" ", @tocheck);

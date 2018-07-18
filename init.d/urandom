@@ -1,0 +1,49 @@
+#!/sbin/runscript
+# Copyright (c) 2007-2009 Roy Marples <roy@marples.name>
+# Copyright © 2007-2018 ANSSI. All Rights Reserved.
+# Released under the 2-clause BSD license.
+
+description="Initializes the random number generator."
+
+depend() {
+	need localmount
+}
+
+start() {
+	local ret=0
+	ebegin "Initializing random number generator"
+	if [[ ! -c "/dev/urandom" ]]; then
+		eend 1 "Random number generator could not be found"
+		return 1
+	fi
+
+	if [[ -f "/var/run/random-seed" ]] ; then
+		cat "/var/run/random-seed" > "/dev/urandom" || ret=1
+	fi
+	if [[ -f "/etc/admin/random-seed" ]]; then
+		einfo "Adding admin-provided random seed"
+		cat "/etc/admin/random-seed" > "/dev/urandom" || ret=1
+	fi
+	if ! rm -f /var/run/random-seed &> /dev/null ; then
+		ewarn "Skipping /var/run/random-seed initialization (ro root?)"
+		eend $ret
+		return $ret
+	fi
+	local mask="$(umask)"
+	umask 077
+	dd if=/dev/urandom of=/var/run/random-seed count=1 bs=2048 &> /dev/null ||ret=1
+	umask "${mask}"
+	eend $ret "Error initializing random number generator"
+}
+
+stop() {
+	ebegin "Saving random seed"
+	local mask="$(umask)"
+	umask 077
+	dd if=/dev/urandom of=/var/run/random-seed count=1 bs=2048 &> /dev/null
+	eend $? "Failed to save random seed"
+	umask "${mask}"
+}
+
+
+# vim:ts=4

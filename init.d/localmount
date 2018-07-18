@@ -1,0 +1,54 @@
+#!/sbin/runscript
+# Copyright (c) 2007-2009 Roy Marples <roy@marples.name>
+# Copyright © 2007-2018 ANSSI. All Rights Reserved.
+# Released under the 2-clause BSD license.
+# Adapted for CLIP - Vincent Strubel <clipos@ssi.gouv.fr>
+
+description="Mounts disks and swap according to /etc/fstab."
+
+depend() {
+	need checkfs
+}
+
+# Perform extra mounts from an /etc/fstab.d file
+do_extra_mounts() {
+	local fstab="${1}"
+	declare -a lines
+	local ifs="${IFS}"
+
+	# skip comments
+	IFS=$'\r\n' lines=( $(sed -e 's/#.*$//' "${fstab}" \
+				| grep -Ev '^[[:space:]]*$' \
+				| awk '{print "-t "$3" -o "$4" "$1" "$2}') )
+	IFS="${ifs}"
+
+	local line ret=0
+	for line in "${lines[@]}"; do 
+		if ! mount ${line}; then
+			ewarn "Failed mount command from ${fstab}: ${line}"
+			ret=1
+		fi
+	done
+	return ${ret}
+}
+
+start() {
+	# Remount / with options from /etc/fstab
+	mount -o remount /
+	local ret=0
+
+	ebegin "Mounting local filesystems"
+	mount /sys 2>/dev/null 
+	mount -a -n -t noproc >/dev/null || ret=1
+
+	local fstab
+	for fstab in /etc/fstab.d/*; do
+		if [[ -f "${fstab}" ]]; then
+			do_extra_mounts "${fstab}" || ret=1
+		fi
+	done
+
+	eend $ret "Some local filesystem failed to mount"
+}
+
+# vim:ts=4

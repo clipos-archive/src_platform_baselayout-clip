@@ -1,0 +1,52 @@
+#!/sbin/runscript
+# Copyright (c) 2007-2008 Roy Marples <roy@marples.name>
+# Copyright © 2007-2018 ANSSI. All Rights Reserved.
+# Released under the 2-clause BSD license.
+# Adapted for CLIP - Vincent Strubel <clipos@ssi.gouv.fr>
+
+description="Kill all processes so we can unmount disks cleanly."
+
+depend()
+{
+	keyword -prefix
+	need jail_init
+}
+
+stop_jails() {
+	local output
+	for jail in /etc/jails/*; do
+		local ctx="$(cat "${jail}/context")"
+		if [[ -n "${ctx}" && -d "/proc/virtual/${ctx}" ]]; then
+			local bn="$(basename "${jail}")"
+			# Jail is still active
+			ebegin "Stopping ${bn} jail"
+			output="$(vsctl "${bn}" stop 2>&1)"
+			if [[ $? -ne 0 ]]; then
+				if echo "${output}" | grep -q "No such process"; then
+					eend 0 # Actually stopped, but proc file lingers a bit
+				else
+					eend 1
+				fi
+			else
+				eend 0 
+			fi
+		fi
+	done
+}
+
+start()
+{
+	ebegin "Stopping all jails"
+	stop_jails
+	eend $?
+
+	ebegin "Terminating remaining processes"
+	killall5 -15 ${killall5_opts}
+	sleep 1
+	eend 0
+	
+	ebegin "Killing remaining processes"
+	killall5 -9 ${killall5_opts}
+	sleep 1
+	eend 0
+}

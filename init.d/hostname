@@ -1,0 +1,32 @@
+#!/sbin/runscript
+# Copyright (c) 2007-2009 Roy Marples <roy@marples.name>
+# Copyright © 2007-2018 ANSSI. All Rights Reserved.
+# Released under the 2-clause BSD license.
+# Adapted for CLIP - Vincent Strubel <clipos@ssi.gouv.fr>
+
+description="Sets the hostname of the machine."
+
+depend() {
+	need localmount
+}
+
+get_conf() {
+	CONF_FILE="/etc/admin/conf.d/netconf/hostname"
+	[[ -f "${CONF_FILE}" ]] || CONF_FILE="/etc/admin/netconf.d/default/hostname"
+	local import_filter="[a-zA-Z0-9-]+"
+
+	source /lib/clip/import.sub
+	import_conf_noerr "${CONF_FILE}" "${import_filter}" HOSTNAME
+	[[ -n "${HOSTNAME}" ]] || HOSTNAME="clip"
+}
+
+start() {
+	get_conf || ewarn "Could not read hostname from ${CONF_FILE}"
+	
+	ebegin "Setting hostname to ${HOSTNAME}"
+	hostname "${HOSTNAME}"
+	eend $? "Failed to set the hostname"
+
+}
+
+# vim:ts=4
